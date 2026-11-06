@@ -125,7 +125,8 @@ export function GridTable({ weeks, people, pending, failedId, updating, onSave }
   )
 }
 
-function WeekHeading({ week }: { week: string }) {
+// Memoized for the same reason as Row, and formatting a date is the expensive part here.
+const WeekHeading = memo(function WeekHeading({ week }: { week: string }) {
   const day = formatDay(week)
   const year = yearOf(week)
 
@@ -135,7 +136,7 @@ function WeekHeading({ week }: { week: string }) {
       <small>{year}</small>
     </th>
   )
-}
+})
 
 function Spacer({ height, columns }: { height: number; columns: number }) {
   if (height <= 0) return null
