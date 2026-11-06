@@ -100,7 +100,7 @@ button {
 .scroller {
   width: fit-content;
   max-width: 100%;
-  height: min(68vh, 44rem);
+  max-height: min(68vh, 44rem);
   overflow: auto;
   scrollbar-gutter: stable;
   border: 1px solid var(--line);
