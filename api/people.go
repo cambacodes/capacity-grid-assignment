@@ -1,6 +1,12 @@
 package main
 
-import "net/http"
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/jackc/pgx/v5"
+)
 
 // person is a row of the people table as the API exposes it.
 type person struct {
@@ -11,10 +17,84 @@ type person struct {
 
 // handleUpdatePerson serves PATCH /api/people/{id}
 //
-// It should update the person's weekly hours. What it returns is yours to
-// design - the grid is the consumer, and it has state to keep honest.
-//
-// TODO: implement.
+// The body is {"weeklyHours":32,"expectedWeeklyHours":40}, both required, where
+// expectedWeeklyHours is the value the client last saw. It responds with the person as
+// stored, or 409 when the current value is neither expected nor already the new one.
 func (s *server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	id, err := readIDParam(r)
+	if err != nil {
+		s.notFoundResponse(w, r)
+		return
+	}
+
+	var input struct {
+		WeeklyHours         *float64 `json:"weeklyHours"`
+		ExpectedWeeklyHours *float64 `json:"expectedWeeklyHours"`
+	}
+	if err := readJSON(w, r, &input); err != nil {
+		s.badRequestResponse(w, r, err)
+		return
+	}
+
+	var v Validator
+	v.Check(input.WeeklyHours != nil, "weeklyHours", "must be provided")
+	v.Check(input.ExpectedWeeklyHours != nil, "expectedWeeklyHours", "must be provided")
+	if input.WeeklyHours != nil {
+		v.Check(*input.WeeklyHours >= 0 && *input.WeeklyHours <= 168, "weeklyHours", "must be between 0 and 168")
+	}
+	if !v.Valid() {
+		s.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	updated, err := s.updateWeeklyHours(r.Context(), id, *input.WeeklyHours, *input.ExpectedWeeklyHours)
+	switch {
+	case errors.Is(err, ErrRecordNotFound):
+		s.notFoundResponse(w, r)
+	case errors.Is(err, ErrEditConflict):
+		s.editConflictResponse(w, r)
+	case err != nil:
+		s.serverErrorResponse(w, r, err)
+	default:
+		writeJSON(w, http.StatusOK, envelope{"person": updated})
+	}
+}
+
+// updateWeeklyHours stores hours for person id, returning ErrRecordNotFound or
+// ErrEditConflict when it cannot.
+func (s *server) updateWeeklyHours(ctx context.Context, id int, hours, expected float64) (person, error) {
+	if _, err := s.getPerson(ctx, id); err != nil {
+		return person{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	// The schema has no version column, so the current value is the version. Accepting
+	// hours as well as expected makes a retry idempotent: if the first PATCH committed
+	// but its response was lost, the retry returns 200 instead of a false conflict.
+	rows, _ := s.db.Query(ctx, `
+		UPDATE people SET weekly_hours = $2::numeric
+		WHERE id = $1 AND weekly_hours IN ($2::numeric, $3::numeric)
+		RETURNING id, name, weekly_hours::float8 AS weekly_hours`, id, hours, expected)
+	updated, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[person])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return person{}, ErrEditConflict
+	}
+	return updated, err
+}
+
+func (s *server) getPerson(ctx context.Context, id int) (person, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	rows, _ := s.db.Query(ctx, `
+		SELECT id, name, weekly_hours::float8 AS weekly_hours
+		FROM people
+		WHERE id = $1`, id)
+	found, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[person])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return person{}, ErrRecordNotFound
+	}
+	return found, err
 }
