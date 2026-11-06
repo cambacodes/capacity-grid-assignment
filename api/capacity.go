@@ -118,6 +118,10 @@ func (s *server) loadRoster(ctx context.Context, weekCount int) ([]personCapacit
 //
 // Seed fact: every real assignment is split into 15 rows whose hours_per_day sum to the
 // real value. Plain SUM is correct; never dedupe them.
+//
+// The weeks come from an integer generate_series because Postgres estimates its row
+// count exactly. It plans the date variant as 1000 rows, and that estimate made even a
+// one-week request pay about 400 ms of JIT compilation.
 func (s *server) fillAllocated(ctx context.Context, people []personCapacity, firstWeek, lastWeek time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
@@ -130,7 +134,7 @@ func (s *server) fillAllocated(ctx context.Context, people []personCapacity, fir
 	rows, _ := s.db.Query(ctx, `
 		SELECT a.person_id, w.week_start,
 		       sum(a.hours_per_day * (least(a.end_date, w.week_start + 4) - greatest(a.start_date, w.week_start) + 1))::float8 AS allocated
-		FROM (SELECT d::date AS week_start FROM generate_series($1::date, $2::date, interval '7 days') d) w
+		FROM (SELECT $1::date + 7 * i AS week_start FROM generate_series(0, ($2::date - $1::date) / 7) i) w
 		JOIN assignments a ON a.start_date <= w.week_start + 4 AND a.end_date >= w.week_start
 		GROUP BY a.person_id, w.week_start`, firstWeek, lastWeek)
 
