@@ -41,5 +41,5 @@ func (s *server) failedValidationResponse(w http.ResponseWriter, r *http.Request
 }
 
 func (s *server) editConflictResponse(w http.ResponseWriter, r *http.Request) {
-	s.errorResponse(w, r, http.StatusConflict, "unable to update the record due to an edit conflict, please try again")
+	s.errorResponse(w, r, http.StatusConflict, "unable to update the record because someone else changed it")
 }

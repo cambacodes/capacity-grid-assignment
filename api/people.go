@@ -68,10 +68,6 @@ func (s *server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
 // updateWeeklyHours stores hours for person id, returning ErrRecordNotFound or
 // ErrEditConflict when it cannot.
 func (s *server) updateWeeklyHours(ctx context.Context, id int, hours, expected float64) (person, error) {
-	if _, err := s.getPerson(ctx, id); err != nil {
-		return person{}, err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
@@ -83,23 +79,19 @@ func (s *server) updateWeeklyHours(ctx context.Context, id int, hours, expected 
 		WHERE id = $1 AND weekly_hours IN ($2::numeric, $3::numeric)
 		RETURNING id, name, weekly_hours::float8 AS weekly_hours`, id, hours, expected)
 	updated, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[person])
-	if errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return updated, err
+	}
+
+	// No row matched: the person is gone, or someone else changed the hours.
+	var exists bool
+	err = s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = $1)`, id).Scan(&exists)
+	switch {
+	case err != nil:
+		return person{}, err
+	case !exists:
+		return person{}, ErrRecordNotFound
+	default:
 		return person{}, ErrEditConflict
 	}
-	return updated, err
-}
-
-func (s *server) getPerson(ctx context.Context, id int) (person, error) {
-	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
-	defer cancel()
-
-	rows, _ := s.db.Query(ctx, `
-		SELECT id, name, weekly_hours::float8 AS weekly_hours
-		FROM people
-		WHERE id = $1`, id)
-	found, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[person])
-	if errors.Is(err, pgx.ErrNoRows) {
-		return person{}, ErrRecordNotFound
-	}
-	return found, err
 }
