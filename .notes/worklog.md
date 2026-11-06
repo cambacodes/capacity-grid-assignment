@@ -19,6 +19,9 @@ left unfinished. Append as you go; a line or two per entry is right.
 - One save at a time. All inputs are read-only while a save is in flight, which removes every per-person race.
 - Conflicts use the book's optimistic concurrency without a version column: the current value is the version (`expectedWeeklyHours`, 409). Keeping the new value in the `IN` list makes a retry idempotent when the first PATCH committed and its response was lost.
 - `generate_series(date, date, interval)` has no row estimate, so Postgres planned 1000 weeks and paid 414 ms of JIT on a one-week query. Generating integers instead gave identical rows and about 9 ms.
+- Days stay `YYYY-MM-DD` strings and every calculation goes through `Temporal.PlainDate` (`temporal-polyfill`, because Node 24 has no native Temporal). A week is a calendar fact, so there is no instant or zone to get wrong. Only "This week" reads a clock, and it reads the viewer's calendar.
+- Go parses days with `time.Parse`, which gives UTC midnight, and moves them with `AddDate`, so DST cannot shift a day. No change was needed there.
+- Browser checks stay out of the repo. The brief asks for a test or two, and the Compose web image has no browser.
 
 ## Tried and dropped
 
