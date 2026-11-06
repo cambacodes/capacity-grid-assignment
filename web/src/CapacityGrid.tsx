@@ -182,11 +182,14 @@ function StatusLine({ save, refreshFailed, onRefresh }: StatusLineProps) {
 }
 
 function describeFailure(error: Error, { person, weeklyHours }: HoursEdit) {
-  const status = error instanceof ApiError ? error.status : null
-  if (status === 409) {
+  // With no answer the save may still have landed, and Retry is safe either way.
+  if (!(error instanceof ApiError)) {
+    return { text: `Couldn't confirm the save for ${person.name} (${weeklyHours} h).`, canRetry: true }
+  }
+  if (error.status === 409) {
     return { text: `${person.name}'s hours were changed elsewhere. Showing the latest.`, canRetry: false }
   }
-  if (status === 404) {
+  if (error.status === 404) {
     return { text: `${person.name} no longer exists.`, canRetry: false }
   }
   return { text: `Couldn't save ${person.name} (${weeklyHours} h).`, canRetry: true }
