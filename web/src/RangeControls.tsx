@@ -14,6 +14,8 @@ type Props = {
   onChange: (range: DateRange) => void
 }
 
+const formatDayWithYear = (day: string) => `${formatDay(day)} ${day.slice(0, 4)}`
+
 function rangeProblem({ from, to }: DateRange) {
   if (!from || !to) return 'Enter both dates.'
   if (to < from) return 'The end date is before the start date.'
@@ -101,7 +103,8 @@ export function RangeControls({ range, onChange }: Props) {
         </p>
       ) : (
         <p className="range-note">
-          {weeks} {weeks === 1 ? 'week' : 'weeks'}, {formatDay(range.from)} to {formatDay(range.to)}
+          {weeks} {weeks === 1 ? 'week' : 'weeks'}, {formatDayWithYear(range.from)} to{' '}
+          {formatDayWithYear(range.to)}
         </p>
       )}
     </div>

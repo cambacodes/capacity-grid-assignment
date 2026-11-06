@@ -4,6 +4,7 @@ import {
   type FocusEvent,
   Fragment,
   type KeyboardEvent,
+  type SyntheticEvent,
   memo,
   useRef,
   useState,
@@ -13,12 +14,17 @@ import { formatDay } from './weeks'
 
 const ROW_HEIGHT = 44
 const NAME_WIDTH = 224
-const HOURS_WIDTH = 88
+const HOURS_WIDTH = 104
 const WEEK_WIDTH = 80
 const FIXED_COLUMNS = 2
 const OVERSCAN_ROWS = 8
 
 const hoursFormat = new Intl.NumberFormat('en', { maximumFractionDigits: 2 })
+
+// Typing replaces the hours, also when the field already had focus from the last save.
+function selectHours(event: SyntheticEvent<HTMLInputElement>) {
+  event.currentTarget.select()
+}
 
 type Props = {
   weeks: string[]
@@ -194,7 +200,7 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
   }
 
   function handleFocus(event: FocusEvent<HTMLInputElement>) {
-    event.target.select()
+    selectHours(event)
     onFocusChange(person.id)
   }
 
@@ -216,6 +222,7 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
         value={draft?.text ?? hoursFormat.format(shownHours)}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onClick={selectHours}
         onFocus={handleFocus}
         onBlur={handleBlur}
       />

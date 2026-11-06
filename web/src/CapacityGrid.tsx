@@ -117,9 +117,8 @@ function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedG
       )}
 
       <p className="legend">
-        Allocated hours count Monday to Friday. Red means more than the person's weekly hours. Edit
-        weekly hours in place, from 0 to {MAX_WEEKLY_HOURS}: Enter saves, Esc cancels. A change
-        applies to every week, past ones too.
+        Allocated hours count Monday to Friday. Weekly hours go from 0 to {MAX_WEEKLY_HOURS}: Enter
+        saves, Esc cancels. A change applies to every week, past ones too.
       </p>
     </section>
   )
