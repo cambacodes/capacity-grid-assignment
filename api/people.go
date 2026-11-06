@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// maxWeeklyHours is every hour in a week, the most a person can be given.
+const maxWeeklyHours = 168
 
 // person is a row of the people table as the API exposes it.
 type person struct {
@@ -40,7 +44,8 @@ func (s *server) handleUpdatePerson(w http.ResponseWriter, r *http.Request) {
 	v.Check(input.WeeklyHours != nil, "weeklyHours", "must be provided")
 	v.Check(input.ExpectedWeeklyHours != nil, "expectedWeeklyHours", "must be provided")
 	if input.WeeklyHours != nil {
-		v.Check(*input.WeeklyHours >= 0 && *input.WeeklyHours <= 168, "weeklyHours", "must be between 0 and 168")
+		v.Check(*input.WeeklyHours >= 0 && *input.WeeklyHours <= maxWeeklyHours, "weeklyHours",
+			fmt.Sprintf("must be between 0 and %d", maxWeeklyHours))
 	}
 	if !v.Valid() {
 		s.failedValidationResponse(w, r, v.Errors)
