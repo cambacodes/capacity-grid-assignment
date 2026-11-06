@@ -34,3 +34,5 @@ left unfinished. Append as you go; a line or two per entry is right.
 - Gzip on the API, and server paging if rosters grow well past a few thousand.
 - `http.Server` timeouts and graceful shutdown, auth, rate limits.
 - A failed save's notice is replaced when the manager saves someone else.
+- Invalid hours left by clicking away return to the real value instead of staying in the field. Keeping them meant a stale draft could outlive a retry and send a false conflict. Enter keeps the value, marked.
+- A failed save's notice stays hidden while the grid itself cannot load, and comes back once it can.
