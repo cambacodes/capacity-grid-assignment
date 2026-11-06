@@ -2,24 +2,33 @@ import {
   keepPreviousData,
   queryOptions,
   useMutation,
+  useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
+import { type } from 'arktype'
 
-export type Person = { id: number; name: string; weeklyHours: number }
+// The API contract. Types come from these schemas, so a response that drifts from
+// them fails here, at the boundary, instead of as a wrong number in the grid.
+const person = type({ id: 'number', name: 'string', weeklyHours: 'number' })
 
-export type PersonCapacity = Person & {
-  // Hours allocated per week, aligned with Capacity.weeks by index.
-  allocated: number[]
-}
+const capacityResponse = type({
+  capacity: {
+    from: 'string',
+    to: 'string',
+    // Monday of each week. PersonCapacity.allocated follows this order.
+    weeks: 'string[]',
+    people: person.and({ allocated: 'number[]' }).array(),
+  },
+})
 
-export type Capacity = {
-  from: string
-  to: string
-  weeks: string[]
-  people: PersonCapacity[]
-}
+const personResponse = type({ person })
+
+export type Person = typeof person.infer
+export type Capacity = typeof capacityResponse.infer.capacity
+export type PersonCapacity = Capacity['people'][number]
 
 export type HoursEdit = {
+  // The person as the manager saw them, whose hours the server compares against.
   person: Person
   weeklyHours: number
 }
@@ -44,44 +53,65 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit) {
-  const response = await fetch(path, init)
+async function readBody(response: Response): Promise<unknown> {
   if (!response.ok) throw new ApiError(response.status)
-  return (await response.json()) as T
+  return response.json()
 }
 
 const CAPACITY_KEY = 'capacity'
+const ALL_RANGES = { queryKey: [CAPACITY_KEY] }
 
 export const capacityQuery = (from: string, to: string) =>
   queryOptions({
     queryKey: [CAPACITY_KEY, from, to],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ from, to })
-      const { capacity } = await request<{ capacity: Capacity }>(`/api/capacity?${params}`, {
-        signal,
-      })
-      return capacity
+      const body = await readBody(await fetch(`/api/capacity?${params}`, { signal }))
+      return capacityResponse.assert(body).capacity
     },
+    // A new range keeps the previous one on screen until it arrives.
     placeholderData: keepPreviousData,
-    retry: 1,
   })
+
+const isOverCapacity = ({ allocated, weeklyHours }: PersonCapacity) =>
+  allocated.some((hours) => hours > weeklyHours)
+
+// Counted over the whole roster and range, never over what happens to be drawn.
+// Module level on purpose: a stable select only reruns when the data changes.
+const withOverPeople = (capacity: Capacity) => ({
+  ...capacity,
+  overPeople: capacity.people.filter(isOverCapacity),
+})
+
+export type CapacityView = ReturnType<typeof withOverPeople>
+
+export function useCapacity(from: string, to: string) {
+  return useQuery({ ...capacityQuery(from, to), select: withOverPeople })
+}
+
+const withSavedHours = (saved: Person) => (range: Capacity | undefined) =>
+  range && {
+    ...range,
+    people: range.people.map((candidate) =>
+      candidate.id === saved.id ? { ...candidate, weeklyHours: saved.weeklyHours } : candidate,
+    ),
+  }
 
 // Saves one person's weekly hours. The cached ranges only change once the server
 // confirms, so a failed save has nothing to undo. The grid shows the pending value
 // from the mutation's own variables.
 export function useSaveHours() {
   const queryClient = useQueryClient()
-  const capacityRanges = { queryKey: [CAPACITY_KEY] }
 
   return useMutation({
     mutationFn: async ({ person, weeklyHours }: HoursEdit) => {
-      const { person: saved } = await request<{ person: Person }>(`/api/people/${person.id}`, {
+      const response = await fetch(`/api/people/${person.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weeklyHours, expectedWeeklyHours: person.weeklyHours }),
         signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
       })
-      return saved
+      return personResponse.assert(await readBody(response)).person
     },
 
     // A save never moves allocated hours, so the response holds everything that changed.
@@ -90,23 +120,14 @@ export function useSaveHours() {
     // Every cached range is rewritten from its own rows, never from whichever range is on
     // screen now: the manager may have moved on while the save was in flight.
     onSuccess: async (saved) => {
-      await queryClient.cancelQueries(capacityRanges)
-      queryClient.setQueriesData<Capacity>(
-        capacityRanges,
-        (range) =>
-          range && {
-            ...range,
-            people: range.people.map((person) =>
-              person.id === saved.id ? { ...person, weeklyHours: saved.weeklyHours } : person,
-            ),
-          },
-      )
+      await queryClient.cancelQueries(ALL_RANGES)
+      queryClient.setQueriesData<Capacity>(ALL_RANGES, withSavedHours(saved))
     },
 
     // Reloads what the save cancelled, and shows the latest hours after a conflict.
     // Not returned: the manager should not wait for a full grid to edit the next person.
     onSettled: () => {
-      void queryClient.invalidateQueries(capacityRanges)
+      void queryClient.invalidateQueries(ALL_RANGES)
     },
   })
 }
