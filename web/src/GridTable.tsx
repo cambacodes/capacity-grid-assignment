@@ -205,16 +205,15 @@ type HoursCellProps = Omit<RowProps, 'pendingHours'> & {
 }
 
 // The hours are always an input, so editing moves nothing on screen and focus stays put.
-// The draft is local: it starts on the first keystroke and ends on save or Escape. That
-// keeps one edit at a time simple, since only the focused input can hold a valid draft,
-// and no save response can close anything because this state never depends on a response.
+// The draft is local: it starts on the first keystroke and ends on save, Escape or leaving
+// the field, so only the focused input ever holds one. No save response can close anything
+// here, because this state never depends on a response.
 function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocusChange }: HoursCellProps) {
   const [draft, setDraft] = useState<Draft | null>(null)
 
-  function commit() {
+  function saveDraft() {
     if (!draft) return
     const weeklyHours = parseHours(draft.text)
-    // An invalid value stays in the field, marked, rather than being thrown away.
     if (weeklyHours === null) return
     setDraft(null)
     if (weeklyHours !== draft.person.weeklyHours) onSave({ person: draft.person, weeklyHours })
@@ -225,7 +224,7 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Enter') commit()
+    if (event.key === 'Enter') saveDraft()
     if (event.key === 'Escape') setDraft(null)
   }
 
@@ -234,8 +233,10 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
     onFocusChange(person.id)
   }
 
+  // Leaving with an invalid value restores the real hours. Enter keeps it, marked.
   function handleBlur() {
-    commit()
+    saveDraft()
+    setDraft(null)
     onFocusChange(null)
   }
 
