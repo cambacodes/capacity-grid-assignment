@@ -178,7 +178,8 @@ function StatusLine({ save, refreshFailed, onRefresh }: StatusLineProps) {
     )
   }
 
-  return <p className="status" />
+  // Stays a live region when empty, or the first message would not be announced.
+  return <p className="status" role="status" />
 }
 
 function describeFailure(error: Error, { person, weeklyHours }: HoursEdit) {
@@ -239,7 +240,7 @@ const SKELETON_ROWS = Array.from({ length: 10 }, (_, row) => row)
 
 function Skeleton() {
   return (
-    <div className="skeleton" aria-busy="true" aria-label="Loading capacity">
+    <div className="skeleton" role="status" aria-label="Loading capacity">
       {SKELETON_ROWS.map((row) => (
         <div key={row} />
       ))}

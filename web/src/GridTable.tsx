@@ -89,7 +89,14 @@ export function GridTable({ weeks, people, pending, failedId, updating, onSave }
   const scrollerClass = updating ? 'scroller updating' : 'scroller'
 
   return (
-    <div ref={scroller} className={scrollerClass} aria-busy={updating}>
+    <div
+      ref={scroller}
+      className={scrollerClass}
+      role="region"
+      aria-label="Capacity by person and week"
+      aria-busy={updating}
+      tabIndex={0}
+    >
       <table style={tableStyle}>
         <colgroup>
           <col style={NAME_COLUMN} />
