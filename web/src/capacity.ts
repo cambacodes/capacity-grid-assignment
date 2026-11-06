@@ -1,5 +1,4 @@
 import {
-  keepPreviousData,
   queryOptions,
   useMutation,
   useQuery,
@@ -69,8 +68,10 @@ export const capacityQuery = (from: string, to: string) =>
       const body = await readOkBody(await fetch(`/api/capacity?${params}`, { signal }))
       return capacityResponse.assert(body).capacity
     },
-    // A new range keeps the previous one on screen until it arrives.
-    placeholderData: keepPreviousData,
+    // A new range keeps the previous one on screen until it arrives. A new function on
+    // every call, on purpose: React Query memoizes the placeholder by this identity, so
+    // keepPreviousData would keep showing the rows from before a save confirmed mid-load.
+    placeholderData: (previous) => previous,
   })
 
 const isOverCapacity = ({ allocated, weeklyHours }: PersonCapacity) =>
@@ -104,6 +105,9 @@ export function useSaveHours() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Saves run one at a time, even when a blur and a click on Retry land together.
+    scope: { id: 'weekly-hours' },
+
     mutationFn: async ({ person, weeklyHours }: HoursEdit) => {
       const response = await fetch(`/api/people/${person.id}`, {
         method: 'PATCH',

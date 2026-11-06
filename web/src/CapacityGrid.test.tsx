@@ -113,6 +113,7 @@ test('a save stays correct through a failure, a range change and a late response
   api.hours = 48
   patch.release(json({ person: { id: 4, name: 'Dee Okafor', weeklyHours: 48 } }))
   await screen.findByText('Saved Dee Okafor: 48 h.')
+  expect((await hoursInput('Dee Okafor')).value).toBe('48')
 
   // The late answer still carries 40. It must not win over the confirmed save.
   api.holdGets = null
