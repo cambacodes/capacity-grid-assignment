@@ -19,7 +19,8 @@ function held<T>() {
   return { promise, release }
 }
 
-// Stands in for the API: Dee is over capacity in every range, and `hours` is the database.
+// Stands in for the API: Ana is exactly full, Dee is over capacity in every range, and
+// `hours` is the database.
 function fakeApi() {
   const api = {
     hours: 40,
@@ -34,6 +35,7 @@ function fakeApi() {
       to,
       weeks: [from],
       people: [
+        { id: 1, name: 'Ana Ferreira', weeklyHours: 40, allocated: [40] },
         { id: 2, name: 'Bo Lindqvist', weeklyHours: 40, allocated: [32] },
         { id: 4, name: 'Dee Okafor', weeklyHours: hours, allocated: [45] },
       ],
@@ -84,8 +86,12 @@ test('a save stays correct through a failure, a range change and a late response
   )
   const { rerender } = render(grid(FIRST))
 
-  // The first attempt fails: the confirmed number stays and the typed one can be retried.
+  // Full is not over: only Dee counts.
   const dee = await hoursInput('Dee Okafor')
+  expect(screen.getByText('1 of 3 people over capacity in these weeks')).toBeTruthy()
+  expect(screen.queryByText('0 h over')).toBeNull()
+
+  // The first attempt fails: the confirmed number stays and the typed one can be retried.
   fireEvent.change(dee, { target: { value: '48' } })
   api.nextPatch = async () => json({ error: 'boom' }, 500)
   fireEvent.keyDown(dee, { key: 'Enter' })
@@ -114,6 +120,7 @@ test('a save stays correct through a failure, a range change and a late response
   patch.release(json({ person: { id: 4, name: 'Dee Okafor', weeklyHours: 48 } }))
   await screen.findByText('Saved Dee Okafor: 48 h.')
   expect((await hoursInput('Dee Okafor')).value).toBe('48')
+  expect(screen.getByText('Updating…')).toBeTruthy()
 
   // The late answer still carries 40. It must not win over the confirmed save.
   api.holdGets = null
@@ -121,6 +128,7 @@ test('a save stays correct through a failure, a range change and a late response
 
   await waitFor(() => expect(hoursOf(client, SECOND)).toEqual({ weeks: [SECOND.from], dee: 48 }))
   expect((await hoursInput('Dee Okafor')).value).toBe('48')
+  await screen.findByText('0 of 3 people over capacity in these weeks')
 
   // The range left behind holds its own weeks, with the new hours.
   expect(hoursOf(client, FIRST)).toEqual({ weeks: [FIRST.from], dee: 48 })
