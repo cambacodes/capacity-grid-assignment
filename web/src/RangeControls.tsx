@@ -17,8 +17,11 @@ type Props = {
 
 const formatDayWithYear = (day: string) => `${formatDay(day)} ${yearOf(day)}`
 
+// A date field can hold a year past 9999, which Date cannot parse in this form.
+const isDay = (text: string) => /^\d{4}-\d{2}-\d{2}$/.test(text)
+
 function rangeProblem({ from, to }: DateRange) {
-  if (!from || !to) return 'Enter both dates.'
+  if (!isDay(from) || !isDay(to)) return 'Enter both dates.'
   if (to < from) return 'The end date is before the start date.'
   if (weekCount({ from, to }) > MAX_WEEKS) return `The limit is ${MAX_WEEKS} weeks.`
   return null

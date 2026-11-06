@@ -84,7 +84,6 @@ function LoadedGrid({ capacity, updating, refreshFailed, onRefresh, save }: Load
   const summary = updating
     ? 'Updating…'
     : `${capacity.overPeople.length} of ${capacity.people.length} people over capacity in these weeks`
-  const emptyMessage = search ? 'Nobody matches that search.' : 'Nobody is over capacity in these weeks.'
 
   return (
     <section className="capacity" aria-label="Capacity by person and week">
@@ -115,15 +114,22 @@ function LoadedGrid({ capacity, updating, refreshFailed, onRefresh, save }: Load
           onSave={save.mutate}
         />
       ) : (
-        <p className="message">{emptyMessage}</p>
+        <EmptyMessage searching={search !== ''} updating={updating} />
       )}
 
       <p className="legend">
-        Allocated hours count Monday to Friday. Weekly hours go from 0 to {MAX_WEEKLY_HOURS}: Enter
-        saves, Esc cancels. A change applies to every week, past ones too.
+        Allocated hours assume a Monday to Friday work week. Weekly hours go from 0 to{' '}
+        {MAX_WEEKLY_HOURS}: Enter saves, Esc cancels. A change applies to every week, past ones too.
       </p>
     </section>
   )
+}
+
+function EmptyMessage({ searching, updating }: { searching: boolean; updating: boolean }) {
+  // An empty list from the previous range says nothing about the one on its way.
+  if (updating) return <p className="message">Updating…</p>
+  if (searching) return <p className="message">Nobody matches that search.</p>
+  return <p className="message">Nobody is over capacity in these weeks.</p>
 }
 
 type StatusLineProps = {
