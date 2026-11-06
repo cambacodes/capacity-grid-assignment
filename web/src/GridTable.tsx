@@ -6,11 +6,12 @@ import {
   type KeyboardEvent,
   type SyntheticEvent,
   memo,
+  useCallback,
   useRef,
   useState,
 } from 'react'
 import { type HoursEdit, type Person, type PersonCapacity, parseHours } from './capacity'
-import { formatDay } from './weeks'
+import { formatDay, yearOf } from './weeks'
 
 const ROW_HEIGHT = 44
 const NAME_WIDTH = 224
@@ -18,6 +19,10 @@ const HOURS_WIDTH = 104
 const WEEK_WIDTH = 80
 const FIXED_COLUMNS = 2
 const OVERSCAN_ROWS = 8
+
+const NAME_COLUMN = { width: NAME_WIDTH }
+const HOURS_COLUMN = { width: HOURS_WIDTH }
+const WEEK_COLUMN = { width: WEEK_WIDTH }
 
 const hoursFormat = new Intl.NumberFormat('en', { maximumFractionDigits: 2 })
 
@@ -32,14 +37,15 @@ type Props = {
   // The save in flight, if any. Its hours replace the confirmed ones in that row.
   pending: HoursEdit | null
   failedId: number | null
-  stale: boolean
+  // The rows still belong to the previous range while a new one loads.
+  updating: boolean
   onSave: (edit: HoursEdit) => void
 }
 
 // Rows are drawn only near the viewport: drawing 3,000 people costs about 500 ms per range
 // change at 12 weeks and over 7 s at two years, against 10 ms and 130 ms this way. They are
 // real table rows between spacers, which keeps table semantics and sticky columns for free.
-export function GridTable({ weeks, people, pending, failedId, stale, onSave }: Props) {
+export function GridTable({ weeks, people, pending, failedId, updating, onSave }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [focusedId, setFocusedId] = useState<number | null>(null)
   const focusedIndex = people.findIndex(({ id }) => id === focusedId)
@@ -51,27 +57,45 @@ export function GridTable({ weeks, people, pending, failedId, stale, onSave }: P
     return [...indexes, focusedIndex].sort((a, b) => a - b)
   }
 
+  // Stable on purpose: the virtualizer re-measures every row when this function changes,
+  // and the table re-renders on each scroll tick.
+  const rowKey = useCallback((index: number) => people[index].id, [people])
+
   const virtualizer = useVirtualizer({
     count: people.length,
     getScrollElement: () => scroller.current,
-    getItemKey: (index) => people[index].id,
+    getItemKey: rowKey,
     estimateSize: () => ROW_HEIGHT,
     overscan: OVERSCAN_ROWS,
     rangeExtractor: keepFocusedRow,
   })
 
   const items = virtualizer.getVirtualItems()
+  const rows = items.map((item, position) => {
+    const person = people[item.index]
+    return {
+      key: item.key,
+      gapBefore: item.start - (items[position - 1]?.end ?? 0),
+      person,
+      pendingHours: pending?.person.id === person.id ? pending.weeklyHours : null,
+      failed: failedId === person.id,
+    }
+  })
+  const gapAfter = virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)
+
+  const locked = pending !== null
   const columns = weeks.length + FIXED_COLUMNS
-  const tableWidth = NAME_WIDTH + HOURS_WIDTH + WEEK_WIDTH * weeks.length
+  const tableStyle = { width: NAME_WIDTH + HOURS_WIDTH + WEEK_WIDTH * weeks.length }
+  const scrollerClass = updating ? 'scroller updating' : 'scroller'
 
   return (
-    <div ref={scroller} className={stale ? 'scroller stale' : 'scroller'} aria-busy={stale}>
-      <table style={{ width: tableWidth }}>
+    <div ref={scroller} className={scrollerClass} aria-busy={updating}>
+      <table style={tableStyle}>
         <colgroup>
-          <col style={{ width: NAME_WIDTH }} />
-          <col style={{ width: HOURS_WIDTH }} />
+          <col style={NAME_COLUMN} />
+          <col style={HOURS_COLUMN} />
           {weeks.map((week) => (
-            <col key={week} style={{ width: WEEK_WIDTH }} />
+            <col key={week} style={WEEK_COLUMN} />
           ))}
         </colgroup>
         <thead>
@@ -83,42 +107,44 @@ export function GridTable({ weeks, people, pending, failedId, stale, onSave }: P
               Hours/week
             </th>
             {weeks.map((week) => (
-              <th scope="col" key={week}>
-                {formatDay(week)}
-                <small>{week.slice(0, 4)}</small>
-              </th>
+              <WeekHeading key={week} week={week} />
             ))}
           </tr>
         </thead>
         <tbody>
-          {items.map((item, position) => {
-            const person = people[item.index]
-            return (
-              <Fragment key={item.key}>
-                <Spacer height={item.start - (items[position - 1]?.end ?? 0)} columns={columns} />
-                <Row
-                  person={person}
-                  pendingHours={pending?.person.id === person.id ? pending.weeklyHours : null}
-                  failed={failedId === person.id}
-                  locked={pending !== null}
-                  onSave={onSave}
-                  onFocusChange={setFocusedId}
-                />
-              </Fragment>
-            )
-          })}
-          <Spacer height={virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)} columns={columns} />
+          {rows.map(({ key, gapBefore, ...row }) => (
+            <Fragment key={key}>
+              <Spacer height={gapBefore} columns={columns} />
+              <Row {...row} locked={locked} onSave={onSave} onFocusChange={setFocusedId} />
+            </Fragment>
+          ))}
+          <Spacer height={gapAfter} columns={columns} />
         </tbody>
       </table>
     </div>
   )
 }
 
+function WeekHeading({ week }: { week: string }) {
+  const day = formatDay(week)
+  const year = yearOf(week)
+
+  return (
+    <th scope="col">
+      {day}
+      <small>{year}</small>
+    </th>
+  )
+}
+
 function Spacer({ height, columns }: { height: number; columns: number }) {
   if (height <= 0) return null
+
+  const style = { height }
+
   return (
     <tr aria-hidden="true">
-      <td className="spacer" colSpan={columns} style={{ height }} />
+      <td className="spacer" colSpan={columns} style={style} />
     </tr>
   )
 }
@@ -144,26 +170,30 @@ const Row = memo(function Row({ person, pendingHours, ...hoursCell }: RowProps) 
         {person.name}
       </th>
       <HoursCell person={person} shownHours={weeklyHours} saving={pendingHours !== null} {...hoursCell} />
-      {person.allocated.map((allocated, week) => (
-        <WeekCell key={week} allocated={allocated} weeklyHours={weeklyHours} />
+      {person.allocated.map((allocated, weekIndex) => (
+        <WeekCell key={weekIndex} allocated={allocated} weeklyHours={weeklyHours} />
       ))}
     </tr>
   )
 })
 
 function WeekCell({ allocated, weeklyHours }: { allocated: number; weeklyHours: number }) {
+  const hours = hoursFormat.format(allocated)
   const over = allocated - weeklyHours
 
   if (over > 0) {
+    const overLabel = `${hoursFormat.format(over)} h over`
     return (
       <td className="week over">
-        {hoursFormat.format(allocated)}
-        <small>{hoursFormat.format(over)} h over</small>
+        {hours}
+        <small>{overLabel}</small>
       </td>
     )
   }
 
-  return <td className={allocated === 0 ? 'week idle' : 'week'}>{hoursFormat.format(allocated)}</td>
+  const className = allocated === 0 ? 'week idle' : 'week'
+
+  return <td className={className}>{hours}</td>
 }
 
 // What the manager typed, and the person as they looked when typing began.
@@ -209,17 +239,21 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
     onFocusChange(null)
   }
 
-  const classNames = ['hours-input', saving && 'saving'].filter(Boolean).join(' ')
+  const cellClass = failed ? 'hours failed' : 'hours'
+  const inputClass = saving ? 'hours-input saving' : 'hours-input'
+  const label = `Weekly hours for ${person.name}`
+  const invalid = draft !== null && parseHours(draft.text) === null
+  const value = draft?.text ?? hoursFormat.format(shownHours)
 
   return (
-    <td className={failed ? 'hours failed' : 'hours'}>
+    <td className={cellClass}>
       <input
-        className={classNames}
+        className={inputClass}
         inputMode="decimal"
-        aria-label={`Weekly hours for ${person.name}`}
-        aria-invalid={draft !== null && parseHours(draft.text) === null}
+        aria-label={label}
+        aria-invalid={invalid}
         readOnly={locked}
-        value={draft?.text ?? hoursFormat.format(shownHours)}
+        value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         onClick={selectHours}

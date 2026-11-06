@@ -53,7 +53,7 @@ export class ApiError extends Error {
   }
 }
 
-async function readBody(response: Response): Promise<unknown> {
+async function readOkBody(response: Response): Promise<unknown> {
   if (!response.ok) throw new ApiError(response.status)
   return response.json()
 }
@@ -66,7 +66,7 @@ export const capacityQuery = (from: string, to: string) =>
     queryKey: [CAPACITY_KEY, from, to],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ from, to })
-      const body = await readBody(await fetch(`/api/capacity?${params}`, { signal }))
+      const body = await readOkBody(await fetch(`/api/capacity?${params}`, { signal }))
       return capacityResponse.assert(body).capacity
     },
     // A new range keeps the previous one on screen until it arrives.
@@ -83,7 +83,7 @@ const withOverPeople = (capacity: Capacity) => ({
   overPeople: capacity.people.filter(isOverCapacity),
 })
 
-export type CapacityView = ReturnType<typeof withOverPeople>
+export type CapacitySummary = ReturnType<typeof withOverPeople>
 
 export function useCapacity(from: string, to: string) {
   return useQuery({ ...capacityQuery(from, to), select: withOverPeople })
@@ -111,7 +111,7 @@ export function useSaveHours() {
         body: JSON.stringify({ weeklyHours, expectedWeeklyHours: person.weeklyHours }),
         signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
       })
-      return personResponse.assert(await readBody(response)).person
+      return personResponse.assert(await readOkBody(response)).person
     },
 
     // A save never moves allocated hours, so the response holds everything that changed.

@@ -55,3 +55,5 @@ const dayAndMonth = new Intl.DateTimeFormat('en-GB', {
 export function formatDay(day: string) {
   return dayAndMonth.format(toDate(day))
 }
+
+export const yearOf = (day: string) => day.slice(0, 4)

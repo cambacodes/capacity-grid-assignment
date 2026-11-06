@@ -7,6 +7,7 @@ import {
   thisWeek,
   weekCount,
   wholeWeeks,
+  yearOf,
 } from './weeks'
 
 type Props = {
@@ -14,7 +15,7 @@ type Props = {
   onChange: (range: DateRange) => void
 }
 
-const formatDayWithYear = (day: string) => `${formatDay(day)} ${day.slice(0, 4)}`
+const formatDayWithYear = (day: string) => `${formatDay(day)} ${yearOf(day)}`
 
 function rangeProblem({ from, to }: DateRange) {
   if (!from || !to) return 'Enter both dates.'
@@ -65,6 +66,8 @@ export function RangeControls({ range, onChange }: Props) {
   }
 
   const weeks = weekCount(range)
+  const unit = weeks === 1 ? 'week' : 'weeks'
+  const span = `${weeks} ${unit}, ${formatDayWithYear(range.from)} to ${formatDayWithYear(range.to)}`
 
   return (
     <div className="range">
@@ -102,10 +105,7 @@ export function RangeControls({ range, onChange }: Props) {
           {problem}
         </p>
       ) : (
-        <p className="range-note">
-          {weeks} {weeks === 1 ? 'week' : 'weeks'}, {formatDayWithYear(range.from)} to{' '}
-          {formatDayWithYear(range.to)}
-        </p>
+        <p className="range-note">{span}</p>
       )}
     </div>
   )

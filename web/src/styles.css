@@ -107,7 +107,7 @@ button {
   transition: opacity 120ms;
 }
 
-.scroller.stale {
+.scroller.updating {
   opacity: 0.55;
 }
 
@@ -118,6 +118,7 @@ table {
   font-variant-numeric: tabular-nums;
 }
 
+/* ROW_HEIGHT in GridTable.tsx. */
 th,
 td {
   box-sizing: border-box;
@@ -169,6 +170,7 @@ thead .hours {
   text-overflow: ellipsis;
 }
 
+/* NAME_WIDTH in GridTable.tsx. */
 .hours {
   left: 224px;
   padding: 0 0.25rem;

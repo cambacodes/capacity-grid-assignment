@@ -1,8 +1,8 @@
-import { type ChangeEvent, useMemo, useState } from 'react'
+import { type ChangeEvent, useState } from 'react'
 import { GridTable } from './GridTable'
 import {
   ApiError,
-  type CapacityView,
+  type CapacitySummary,
   type HoursEdit,
   MAX_WEEKLY_HOURS,
   type PersonCapacity,
@@ -42,7 +42,7 @@ export function CapacityGrid({ from, to }: Props) {
     return (
       <LoadedGrid
         capacity={capacity.data}
-        stale={capacity.isPlaceholderData}
+        updating={capacity.isPlaceholderData}
         refreshFailed={capacity.isRefetchError}
         onRefresh={handleReload}
         save={save}
@@ -56,20 +56,21 @@ export function CapacityGrid({ from, to }: Props) {
 }
 
 type LoadedGridProps = {
-  capacity: CapacityView
-  stale: boolean
+  capacity: CapacitySummary
+  updating: boolean
   refreshFailed: boolean
   onRefresh: () => void
   save: Save
 }
 
-function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedGridProps) {
+function LoadedGrid({ capacity, updating, refreshFailed, onRefresh, save }: LoadedGridProps) {
   const [search, setSearch] = useState('')
   const [overOnly, setOverOnly] = useState(false)
 
   // Both lists hold confirmed data, so a row only leaves the filter once its save is confirmed.
-  const candidates = overOnly ? capacity.overPeople : capacity.people
-  const people = useMemo(() => matchByName(candidates, search), [candidates, search])
+  const people = matchByName(overOnly ? capacity.overPeople : capacity.people, search)
+  const pending = save.isPending ? save.variables : null
+  const failedId = save.isError ? save.variables.person.id : null
 
   function handleSearch(event: ChangeEvent<HTMLInputElement>) {
     setSearch(event.target.value)
@@ -79,7 +80,11 @@ function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedG
     setOverOnly(event.target.checked)
   }
 
-  const summary = `${capacity.overPeople.length} of ${capacity.people.length} people over capacity in these weeks`
+  // While a new range loads the list on screen is the old one, so it gets no claim.
+  const summary = updating
+    ? 'Updating…'
+    : `${capacity.overPeople.length} of ${capacity.people.length} people over capacity in these weeks`
+  const emptyMessage = search ? 'Nobody matches that search.' : 'Nobody is over capacity in these weeks.'
 
   return (
     <section className="capacity" aria-label="Capacity by person and week">
@@ -95,8 +100,7 @@ function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedG
           <input type="checkbox" checked={overOnly} onChange={handleOverOnly} />
           Over capacity only
         </label>
-        {/* The list on screen still belongs to the previous range, so it gets no claim. */}
-        <p className="summary">{stale ? 'Updating…' : summary}</p>
+        <p className="summary">{summary}</p>
       </div>
 
       <StatusLine save={save} refreshFailed={refreshFailed} onRefresh={onRefresh} />
@@ -105,15 +109,13 @@ function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedG
         <GridTable
           weeks={capacity.weeks}
           people={people}
-          pending={save.isPending ? save.variables : null}
-          failedId={save.isError ? save.variables.person.id : null}
-          stale={stale}
+          pending={pending}
+          failedId={failedId}
+          updating={updating}
           onSave={save.mutate}
         />
       ) : (
-        <p className="message">
-          {search ? 'Nobody matches that search.' : 'Nobody is over capacity in these weeks.'}
-        </p>
+        <p className="message">{emptyMessage}</p>
       )}
 
       <p className="legend">
