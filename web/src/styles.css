@@ -176,44 +176,36 @@ thead .hours {
   box-shadow: inset 0 0 0 2px var(--problem);
 }
 
-/* The button and the input share a box, so opening the editor moves nothing. */
-.hours-button,
 .hours-input {
   box-sizing: border-box;
   display: block;
   width: 100%;
   height: 32px;
-  margin: 0;
   padding: 0 0.4rem;
   border: 1px solid transparent;
   border-radius: 4px;
+  outline: none;
   background: transparent;
   color: inherit;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-.hours-button:hover {
+.hours-input:hover {
   border-color: var(--line);
 }
 
-.hours-button[aria-disabled='true'] {
-  cursor: default;
-}
-
-.hours-button.saving {
-  color: var(--accent);
-  animation: pulse 1s ease-in-out infinite;
-}
-
-.hours-input {
+.hours-input:focus {
   border-color: var(--accent);
-  background: Canvas;
-  outline: none;
 }
 
 .hours-input[aria-invalid='true'] {
   border-color: var(--problem);
+}
+
+.hours-input.saving {
+  color: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -275,7 +267,7 @@ thead .hours {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hours-button.saving,
+  .hours-input.saving,
   .skeleton div {
     animation: none;
   }

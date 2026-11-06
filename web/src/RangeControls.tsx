@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type ChangeEvent, useState } from 'react'
 import {
   MAX_WEEKS,
   type DateRange,
@@ -28,17 +28,37 @@ export function RangeControls({ range, onChange }: Props) {
   const shown = typed ?? range
   const problem = rangeProblem(shown)
 
-  function type(next: DateRange) {
+  function applyTyped(next: DateRange) {
     setTyped(next)
     if (!rangeProblem(next)) onChange(wholeWeeks(next))
   }
 
-  function move(next: DateRange) {
+  function applyMove(next: DateRange) {
     setTyped(null)
     onChange(next)
   }
 
-  const finishTyping = () => {
+  function handlePrevious() {
+    applyMove(shiftWeeks(range, -1))
+  }
+
+  function handleThisWeek() {
+    applyMove(thisWeek(range, new Date()))
+  }
+
+  function handleNext() {
+    applyMove(shiftWeeks(range, 1))
+  }
+
+  function handleFrom(event: ChangeEvent<HTMLInputElement>) {
+    applyTyped({ ...shown, from: event.target.value })
+  }
+
+  function handleTo(event: ChangeEvent<HTMLInputElement>) {
+    applyTyped({ ...shown, to: event.target.value })
+  }
+
+  function handleBlur() {
     if (!problem) setTyped(null)
   }
 
@@ -46,13 +66,13 @@ export function RangeControls({ range, onChange }: Props) {
 
   return (
     <div className="range">
-      <button type="button" aria-label="Previous week" onClick={() => move(shiftWeeks(range, -1))}>
+      <button type="button" aria-label="Previous week" onClick={handlePrevious}>
         ←
       </button>
-      <button type="button" onClick={() => move(thisWeek(range, new Date()))}>
+      <button type="button" onClick={handleThisWeek}>
         This week
       </button>
-      <button type="button" aria-label="Next week" onClick={() => move(shiftWeeks(range, 1))}>
+      <button type="button" aria-label="Next week" onClick={handleNext}>
         →
       </button>
       <label>
@@ -61,8 +81,8 @@ export function RangeControls({ range, onChange }: Props) {
           type="date"
           value={shown.from}
           aria-invalid={problem !== null}
-          onChange={(event) => type({ ...shown, from: event.target.value })}
-          onBlur={finishTyping}
+          onChange={handleFrom}
+          onBlur={handleBlur}
         />
       </label>
       <label>
@@ -71,8 +91,8 @@ export function RangeControls({ range, onChange }: Props) {
           type="date"
           value={shown.to}
           aria-invalid={problem !== null}
-          onChange={(event) => type({ ...shown, to: event.target.value })}
-          onBlur={finishTyping}
+          onChange={handleTo}
+          onBlur={handleBlur}
         />
       </label>
       {problem ? (

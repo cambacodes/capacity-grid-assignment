@@ -1,6 +1,14 @@
-import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual'
-import { type KeyboardEvent, type ReactNode, type RefObject, memo, useCallback, useRef } from 'react'
-import { type Person, type PersonCapacity, parseHours } from './capacity'
+import { type Range, defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual'
+import {
+  type ChangeEvent,
+  type FocusEvent,
+  Fragment,
+  type KeyboardEvent,
+  memo,
+  useRef,
+  useState,
+} from 'react'
+import { type HoursEdit, type Person, type PersonCapacity, parseHours } from './capacity'
 import { formatDay } from './weeks'
 
 const ROW_HEIGHT = 44
@@ -8,83 +16,51 @@ const NAME_WIDTH = 224
 const HOURS_WIDTH = 88
 const WEEK_WIDTH = 80
 const FIXED_COLUMNS = 2
+const OVERSCAN_ROWS = 8
 
 const hoursFormat = new Intl.NumberFormat('en', { maximumFractionDigits: 2 })
 
-// The person being edited. `text` is the input's raw value, which may not be valid yet.
-export type Editing = { person: Person; text: string }
-
-type RowActions = {
-  onStartEdit: (person: Person) => void
-  onTypeHours: (text: string) => void
-  // Called when the editor loses focus, the only way it closes.
-  onFinishEdit: (editing: Editing, cancelled: boolean) => void
-}
-
-type Props = RowActions & {
+type Props = {
   weeks: string[]
   people: PersonCapacity[]
-  editing: Editing | null
-  // Nobody else can be edited while this is true: one edit and one save at a time.
-  locked: boolean
-  // The pending value of the save in flight, shown in place of the confirmed hours.
-  pending: { id: number; weeklyHours: number } | null
+  // The save in flight, if any. Its hours replace the confirmed ones in that row.
+  pending: HoursEdit | null
   failedId: number | null
   stale: boolean
+  onSave: (edit: HoursEdit) => void
 }
 
-// Rows are drawn only when near the viewport. Drawing a roster of 3,000 people costs
-// about 500 ms per range change at 12 weeks and over 7 s at two years.
-export function GridTable({ weeks, people, editing, locked, pending, failedId, stale, ...actions }: Props) {
+// Rows are drawn only near the viewport: drawing 3,000 people costs about 500 ms per range
+// change at 12 weeks and over 7 s at two years, against 10 ms and 130 ms this way. They are
+// real table rows between spacers, which keeps table semantics and sticky columns for free.
+export function GridTable({ weeks, people, pending, failedId, stale, onSave }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
-  const refocus = useRef<number | null>(null)
+  const [focusedId, setFocusedId] = useState<number | null>(null)
+  const focusedIndex = people.findIndex(({ id }) => id === focusedId)
 
-  const editingIndex = editing ? people.findIndex(({ id }) => id === editing.person.id) : -1
+  // A row being typed in stays drawn when scrolled away, so the text is not lost.
+  function keepFocusedRow(range: Range) {
+    const indexes = defaultRangeExtractor(range)
+    if (focusedIndex === -1 || indexes.includes(focusedIndex)) return indexes
+    return [...indexes, focusedIndex].sort((a, b) => a - b)
+  }
 
   const virtualizer = useVirtualizer({
     count: people.length,
     getScrollElement: () => scroller.current,
+    getItemKey: (index) => people[index].id,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 8,
-    // Scrolling away must not unmount the input and lose what was typed.
-    rangeExtractor: useCallback(
-      (range: Parameters<typeof defaultRangeExtractor>[0]) => {
-        const indexes = defaultRangeExtractor(range)
-        if (editingIndex === -1 || indexes.includes(editingIndex)) return indexes
-        return [...indexes, editingIndex].sort((a, b) => a - b)
-      },
-      [editingIndex],
-    ),
+    overscan: OVERSCAN_ROWS,
+    rangeExtractor: keepFocusedRow,
   })
 
+  const items = virtualizer.getVirtualItems()
   const columns = weeks.length + FIXED_COLUMNS
-  const rows: ReactNode[] = []
-  let drawnTo = 0
-
-  for (const item of virtualizer.getVirtualItems()) {
-    if (item.start > drawnTo) rows.push(<Spacer key={`gap-${item.index}`} height={item.start - drawnTo} columns={columns} />)
-    const person = people[item.index]
-    rows.push(
-      <Row
-        key={person.id}
-        person={person}
-        weeklyHours={pending?.id === person.id ? pending.weeklyHours : person.weeklyHours}
-        saving={pending?.id === person.id}
-        failed={failedId === person.id}
-        editing={editing?.person.id === person.id ? editing : null}
-        locked={locked}
-        refocus={refocus}
-        {...actions}
-      />,
-    )
-    drawnTo = item.end
-  }
-  const total = virtualizer.getTotalSize()
-  if (total > drawnTo) rows.push(<Spacer key="gap-end" height={total - drawnTo} columns={columns} />)
+  const tableWidth = NAME_WIDTH + HOURS_WIDTH + WEEK_WIDTH * weeks.length
 
   return (
     <div ref={scroller} className={stale ? 'scroller stale' : 'scroller'} aria-busy={stale}>
-      <table style={{ width: NAME_WIDTH + HOURS_WIDTH + WEEK_WIDTH * weeks.length }}>
+      <table style={{ width: tableWidth }}>
         <colgroup>
           <col style={{ width: NAME_WIDTH }} />
           <col style={{ width: HOURS_WIDTH }} />
@@ -108,13 +84,32 @@ export function GridTable({ weeks, people, editing, locked, pending, failedId, s
             ))}
           </tr>
         </thead>
-        <tbody>{rows}</tbody>
+        <tbody>
+          {items.map((item, position) => {
+            const person = people[item.index]
+            return (
+              <Fragment key={item.key}>
+                <Spacer height={item.start - (items[position - 1]?.end ?? 0)} columns={columns} />
+                <Row
+                  person={person}
+                  pendingHours={pending?.person.id === person.id ? pending.weeklyHours : null}
+                  failed={failedId === person.id}
+                  locked={pending !== null}
+                  onSave={onSave}
+                  onFocusChange={setFocusedId}
+                />
+              </Fragment>
+            )
+          })}
+          <Spacer height={virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)} columns={columns} />
+        </tbody>
       </table>
     </div>
   )
 }
 
 function Spacer({ height, columns }: { height: number; columns: number }) {
+  if (height <= 0) return null
   return (
     <tr aria-hidden="true">
       <td className="spacer" colSpan={columns} style={{ height }} />
@@ -122,95 +117,108 @@ function Spacer({ height, columns }: { height: number; columns: number }) {
   )
 }
 
-type RowProps = RowActions & {
+type RowProps = {
   person: PersonCapacity
-  weeklyHours: number
-  saving: boolean
+  pendingHours: number | null
   failed: boolean
-  editing: Editing | null
   locked: boolean
-  refocus: RefObject<number | null>
+  onSave: (edit: HoursEdit) => void
+  onFocusChange: (id: number | null) => void
 }
 
-const Row = memo(function Row({
-  person,
-  weeklyHours,
-  saving,
-  failed,
-  editing,
-  locked,
-  refocus,
-  onStartEdit,
-  onTypeHours,
-  onFinishEdit,
-}: RowProps) {
-  // Blur is the single way out of the editor, so a save can never fire twice.
-  // Enter and Escape only decide how it leaves and hand keyboard focus back.
-  const cancelled = useRef(false)
-
-  function handleKey(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Enter' && editing && parseHours(editing.text) !== null) {
-      refocus.current = person.id
-      event.currentTarget.blur()
-    }
-    if (event.key === 'Escape') {
-      cancelled.current = true
-      refocus.current = person.id
-      event.currentTarget.blur()
-    }
-  }
+// Memoized because the virtualizer re-renders the table on every scroll tick. Props are
+// primitives, stable callbacks, and person objects that React Query's structural sharing
+// keeps identical across refetches.
+const Row = memo(function Row({ person, pendingHours, ...hoursCell }: RowProps) {
+  const weeklyHours = pendingHours ?? person.weeklyHours
 
   return (
     <tr>
       <th scope="row" className="name" title={person.name}>
         {person.name}
       </th>
-      <td className={failed ? 'hours failed' : 'hours'}>
-        {editing === null ? (
-          <button
-            type="button"
-            className={saving ? 'hours-button saving' : 'hours-button'}
-            aria-disabled={locked}
-            aria-label={`Weekly hours for ${person.name}: ${hoursFormat.format(weeklyHours)}. Edit`}
-            ref={(button) => {
-              if (button && refocus.current === person.id) {
-                refocus.current = null
-                button.focus()
-              }
-            }}
-            onClick={() => {
-              if (!locked) onStartEdit(person)
-            }}
-          >
-            {hoursFormat.format(weeklyHours)}
-          </button>
-        ) : (
-          <input
-            className="hours-input"
-            inputMode="decimal"
-            aria-label={`Weekly hours for ${person.name}`}
-            aria-invalid={parseHours(editing.text) === null}
-            autoFocus
-            value={editing.text}
-            onFocus={(event) => event.target.select()}
-            onChange={(event) => onTypeHours(event.target.value)}
-            onKeyDown={handleKey}
-            onBlur={() => {
-              onFinishEdit(editing, cancelled.current)
-              cancelled.current = false
-            }}
-          />
-        )}
-      </td>
-      {person.allocated.map((allocated, week) => {
-        const over = allocated - weeklyHours
-        return (
-          <td key={week} className={over > 0 ? 'week over' : allocated === 0 ? 'week idle' : 'week'}>
-            {hoursFormat.format(allocated)}
-            {over > 0 && <small>{hoursFormat.format(over)} h over</small>}
-          </td>
-        )
-      })}
+      <HoursCell person={person} shownHours={weeklyHours} saving={pendingHours !== null} {...hoursCell} />
+      {person.allocated.map((allocated, week) => (
+        <WeekCell key={week} allocated={allocated} weeklyHours={weeklyHours} />
+      ))}
     </tr>
   )
 })
+
+function WeekCell({ allocated, weeklyHours }: { allocated: number; weeklyHours: number }) {
+  const over = allocated - weeklyHours
+
+  if (over > 0) {
+    return (
+      <td className="week over">
+        {hoursFormat.format(allocated)}
+        <small>{hoursFormat.format(over)} h over</small>
+      </td>
+    )
+  }
+
+  return <td className={allocated === 0 ? 'week idle' : 'week'}>{hoursFormat.format(allocated)}</td>
+}
+
+// What the manager typed, and the person as they looked when typing began.
+type Draft = { text: string; person: Person }
+
+type HoursCellProps = Omit<RowProps, 'pendingHours'> & {
+  shownHours: number
+  saving: boolean
+}
+
+// The hours are always an input, so editing moves nothing on screen and focus stays put.
+// The draft is local: it starts on the first keystroke and ends on save or Escape. That
+// keeps one edit at a time simple, since only the focused input can hold a valid draft,
+// and no save response can close anything because this state never depends on a response.
+function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocusChange }: HoursCellProps) {
+  const [draft, setDraft] = useState<Draft | null>(null)
+
+  function commit() {
+    if (!draft) return
+    const weeklyHours = parseHours(draft.text)
+    // An invalid value stays in the field, marked, rather than being thrown away.
+    if (weeklyHours === null) return
+    setDraft(null)
+    if (weeklyHours !== draft.person.weeklyHours) onSave({ person: draft.person, weeklyHours })
+  }
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    if (!locked) setDraft({ text: event.target.value, person: draft?.person ?? person })
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') commit()
+    if (event.key === 'Escape') setDraft(null)
+  }
+
+  function handleFocus(event: FocusEvent<HTMLInputElement>) {
+    event.target.select()
+    onFocusChange(person.id)
+  }
+
+  function handleBlur() {
+    commit()
+    onFocusChange(null)
+  }
+
+  const classNames = ['hours-input', saving && 'saving'].filter(Boolean).join(' ')
+
+  return (
+    <td className={failed ? 'hours failed' : 'hours'}>
+      <input
+        className={classNames}
+        inputMode="decimal"
+        aria-label={`Weekly hours for ${person.name}`}
+        aria-invalid={draft !== null && parseHours(draft.text) === null}
+        readOnly={locked}
+        value={draft?.text ?? hoursFormat.format(shownHours)}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+      />
+    </td>
+  )
+}

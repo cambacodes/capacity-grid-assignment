@@ -1,14 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
-import { useCallback, useMemo, useState } from 'react'
-import { type Editing, GridTable } from './GridTable'
+import { type ChangeEvent, useMemo, useState } from 'react'
+import { GridTable } from './GridTable'
 import {
   ApiError,
+  type CapacityView,
   type HoursEdit,
   MAX_WEEKLY_HOURS,
-  type Person,
   type PersonCapacity,
-  capacityQuery,
-  parseHours,
+  useCapacity,
   useSaveHours,
 } from './capacity'
 
@@ -17,63 +15,71 @@ type Props = {
   to: string
 }
 
-const isOverCapacity = ({ allocated, weeklyHours }: PersonCapacity) =>
-  allocated.some((hours) => hours > weeklyHours)
+type Save = ReturnType<typeof useSaveHours>
 
 // So that "ines" finds "Inés".
-const foldForSearch = (text: string) =>
-  text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+const foldForSearch = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
 
-// CapacityGrid renders one row per person and one column per week, and owns the edit of
-// a person's weekly hours. One person is edited at a time and nobody else can be opened
-// until that save settles, so at most one save exists and its state is the mutation's.
+function matchByName(people: PersonCapacity[], search: string) {
+  const needle = foldForSearch(search.trim())
+  return needle ? people.filter(({ name }) => foldForSearch(name).includes(needle)) : people
+}
+
+// CapacityGrid renders one row per person and one column per week, and owns the save of a
+// person's weekly hours. Nobody can be edited while a save is in flight, so at most one
+// save exists and its whole state is the mutation's. It lives here, above the loaded view,
+// so it survives a range that fails to load.
 export function CapacityGrid({ from, to }: Props) {
-  const capacity = useQuery(capacityQuery(from, to))
+  const capacity = useCapacity(from, to)
   const save = useSaveHours()
 
-  const [editing, setEditing] = useState<Editing | null>(null)
+  function handleReload() {
+    void capacity.refetch()
+  }
+
+  // Data first: a failed background refresh must not take the numbers off the screen.
+  if (capacity.data) {
+    return (
+      <LoadedGrid
+        capacity={capacity.data}
+        stale={capacity.isPlaceholderData}
+        refreshFailed={capacity.isRefetchError}
+        onRefresh={handleReload}
+        save={save}
+      />
+    )
+  }
+
+  if (capacity.isError) return <LoadFailed onRetry={handleReload} />
+
+  return <Skeleton />
+}
+
+type LoadedGridProps = {
+  capacity: CapacityView
+  stale: boolean
+  refreshFailed: boolean
+  onRefresh: () => void
+  save: Save
+}
+
+function LoadedGrid({ capacity, stale, refreshFailed, onRefresh, save }: LoadedGridProps) {
   const [search, setSearch] = useState('')
   const [overOnly, setOverOnly] = useState(false)
 
-  const everyone = capacity.data?.people
-  const overCount = useMemo(() => everyone?.filter(isOverCapacity).length ?? 0, [everyone])
+  // Both lists hold confirmed data, so a row only leaves the filter once its save is confirmed.
+  const candidates = overOnly ? capacity.overPeople : capacity.people
+  const people = useMemo(() => matchByName(candidates, search), [candidates, search])
 
-  // Filters read confirmed data, so a row only leaves the list once its save is confirmed.
-  const people = useMemo(() => {
-    const needle = foldForSearch(search.trim())
-    return (everyone ?? []).filter(
-      (person) =>
-        (!overOnly || isOverCapacity(person)) && foldForSearch(person.name).includes(needle),
-    )
-  }, [everyone, search, overOnly])
+  function handleSearch(event: ChangeEvent<HTMLInputElement>) {
+    setSearch(event.target.value)
+  }
 
-  const onStartEdit = useCallback(
-    (person: Person) => setEditing({ person, text: String(person.weeklyHours) }),
-    [],
-  )
+  function handleOverOnly(event: ChangeEvent<HTMLInputElement>) {
+    setOverOnly(event.target.checked)
+  }
 
-  const onTypeHours = useCallback(
-    (text: string) => setEditing((current) => current && { ...current, text }),
-    [],
-  )
-
-  const { mutate } = save
-  const onFinishEdit = useCallback(
-    ({ person, text }: Editing, cancelled: boolean) => {
-      const weeklyHours = parseHours(text)
-      // An invalid value stays open with its message rather than being thrown away.
-      if (!cancelled && weeklyHours === null) return
-      setEditing(null)
-      if (!cancelled && weeklyHours !== null && weeklyHours !== person.weeklyHours) {
-        mutate({ person, weeklyHours })
-      }
-    },
-    [mutate],
-  )
-
-  const pending = save.isPending
-    ? { id: save.variables.person.id, weeklyHours: save.variables.weeklyHours }
-    : null
+  const summary = `${capacity.overPeople.length} of ${capacity.people.length} people over capacity in these weeks`
 
   return (
     <section className="capacity" aria-label="Capacity by person and week">
@@ -83,100 +89,50 @@ export function CapacityGrid({ from, to }: Props) {
           placeholder="Search people"
           aria-label="Search people"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={handleSearch}
         />
         <label>
-          <input
-            type="checkbox"
-            checked={overOnly}
-            onChange={(event) => setOverOnly(event.target.checked)}
-          />
+          <input type="checkbox" checked={overOnly} onChange={handleOverOnly} />
           Over capacity only
         </label>
-        <p className="summary">
-          {capacity.isPlaceholderData
-            ? 'Updating…'
-            : everyone && `${overCount} of ${everyone.length} people over capacity in these weeks`}
-        </p>
+        {/* The list on screen still belongs to the previous range, so it gets no claim. */}
+        <p className="summary">{stale ? 'Updating…' : summary}</p>
       </div>
 
-      <StatusLine
-        editing={editing}
-        save={save}
-        refreshFailed={capacity.isRefetchError}
-        onRefresh={() => void capacity.refetch()}
-      />
+      <StatusLine save={save} refreshFailed={refreshFailed} onRefresh={onRefresh} />
 
-      {/* Data first: a failed background refresh must not take the numbers off the screen. */}
-      {capacity.data ? (
-        people.length > 0 ? (
-          <GridTable
-            weeks={capacity.data.weeks}
-            people={people}
-            editing={editing}
-            locked={save.isPending || editing !== null}
-            pending={pending}
-            failedId={save.isError ? save.variables.person.id : null}
-            stale={capacity.isPlaceholderData}
-            onStartEdit={onStartEdit}
-            onTypeHours={onTypeHours}
-            onFinishEdit={onFinishEdit}
-          />
-        ) : (
-          <p className="message">
-            {search ? 'Nobody matches that search.' : 'Nobody is over capacity in these weeks.'}
-          </p>
-        )
-      ) : capacity.isError ? (
-        <div className="message" role="alert">
-          <p>Couldn't load capacity.</p>
-          <button type="button" onClick={() => void capacity.refetch()}>
-            Retry
-          </button>
-        </div>
+      {people.length > 0 ? (
+        <GridTable
+          weeks={capacity.weeks}
+          people={people}
+          pending={save.isPending ? save.variables : null}
+          failedId={save.isError ? save.variables.person.id : null}
+          stale={stale}
+          onSave={save.mutate}
+        />
       ) : (
-        <Skeleton />
+        <p className="message">
+          {search ? 'Nobody matches that search.' : 'Nobody is over capacity in these weeks.'}
+        </p>
       )}
 
       <p className="legend">
-        Hours allocated per week, counting Monday to Friday. Red means more than the person's weekly
-        hours.
+        Allocated hours count Monday to Friday. Red means more than the person's weekly hours. Edit
+        weekly hours in place, from 0 to {MAX_WEEKLY_HOURS}: Enter saves, Esc cancels. A change
+        applies to every week, past ones too.
       </p>
     </section>
   )
 }
 
-function saveFailure(error: Error, { person, weeklyHours }: HoursEdit) {
-  if (error instanceof ApiError && error.status === 409) {
-    return { text: `${person.name}'s hours were changed elsewhere. Showing the latest.`, canRetry: false }
-  }
-  if (error instanceof ApiError && error.status === 404) {
-    return { text: `${person.name} no longer exists.`, canRetry: false }
-  }
-  return { text: `Couldn't save ${person.name} (${weeklyHours} h).`, canRetry: true }
-}
-
 type StatusLineProps = {
-  editing: Editing | null
-  save: ReturnType<typeof useSaveHours>
+  save: Save
   refreshFailed: boolean
   onRefresh: () => void
 }
 
 // One line with reserved height, so nothing in the grid moves when a message appears.
-function StatusLine({ editing, save, refreshFailed, onRefresh }: StatusLineProps) {
-  if (editing) {
-    return parseHours(editing.text) === null ? (
-      <p className="status problem" role="alert">
-        Enter hours from 0 to {MAX_WEEKLY_HOURS}, or press Esc.
-      </p>
-    ) : (
-      <p className="status">
-        {editing.person.name}: this changes every week, past ones too. Enter saves, Esc cancels.
-      </p>
-    )
-  }
-
+function StatusLine({ save, refreshFailed, onRefresh }: StatusLineProps) {
   if (save.isPending) {
     return (
       <p className="status" role="status">
@@ -186,19 +142,13 @@ function StatusLine({ editing, save, refreshFailed, onRefresh }: StatusLineProps
   }
 
   if (save.isError) {
-    const failure = saveFailure(save.error, save.variables)
     return (
-      <div className="status problem" role="alert">
-        {failure.text}
-        {failure.canRetry && (
-          <button type="button" onClick={() => save.mutate(save.variables)}>
-            Retry
-          </button>
-        )}
-        <button type="button" onClick={() => save.reset()}>
-          Dismiss
-        </button>
-      </div>
+      <SaveFailed
+        error={save.error}
+        edit={save.variables}
+        onRetry={save.mutate}
+        onDismiss={save.reset}
+      />
     )
   }
 
@@ -224,10 +174,63 @@ function StatusLine({ editing, save, refreshFailed, onRefresh }: StatusLineProps
   return <p className="status" />
 }
 
+function describeFailure(error: Error, { person, weeklyHours }: HoursEdit) {
+  const status = error instanceof ApiError ? error.status : null
+  if (status === 409) {
+    return { text: `${person.name}'s hours were changed elsewhere. Showing the latest.`, canRetry: false }
+  }
+  if (status === 404) {
+    return { text: `${person.name} no longer exists.`, canRetry: false }
+  }
+  return { text: `Couldn't save ${person.name} (${weeklyHours} h).`, canRetry: true }
+}
+
+type SaveFailedProps = {
+  error: Error
+  edit: HoursEdit
+  onRetry: (edit: HoursEdit) => void
+  onDismiss: () => void
+}
+
+function SaveFailed({ error, edit, onRetry, onDismiss }: SaveFailedProps) {
+  const { text, canRetry } = describeFailure(error, edit)
+
+  function handleRetry() {
+    onRetry(edit)
+  }
+
+  return (
+    <div className="status problem" role="alert">
+      {text}
+      {canRetry && (
+        <button type="button" onClick={handleRetry}>
+          Retry
+        </button>
+      )}
+      <button type="button" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="message" role="alert">
+      <p>Couldn't load capacity.</p>
+      <button type="button" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  )
+}
+
+const SKELETON_ROWS = Array.from({ length: 10 }, (_, row) => row)
+
 function Skeleton() {
   return (
     <div className="skeleton" aria-busy="true" aria-label="Loading capacity">
-      {Array.from({ length: 10 }, (_, row) => (
+      {SKELETON_ROWS.map((row) => (
         <div key={row} />
       ))}
     </div>

@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { CapacityGrid } from './CapacityGrid'
 import { type Capacity, capacityQuery } from './capacity'
+import { createQueryClient } from './queryClient'
 
 const FIRST = { from: '2026-01-05', to: '2026-01-11' }
 const SECOND = { from: '2026-01-12', to: '2026-01-18' }
@@ -54,8 +55,8 @@ function fakeApi() {
   return api
 }
 
-const deeButton = (hours: number) =>
-  screen.findByRole('button', { name: `Weekly hours for Dee Okafor: ${hours}. Edit` })
+const hoursInput = (name: string) =>
+  screen.findByRole<HTMLInputElement>('textbox', { name: `Weekly hours for ${name}` })
 
 const hoursOf = (client: QueryClient, { from, to }: typeof FIRST) => {
   const capacity = client.getQueryData(capacityQuery(from, to).queryKey)
@@ -75,7 +76,7 @@ afterEach(() => {
 
 test('a save stays correct through a failure, a range change and a late response', async () => {
   const api = fakeApi()
-  const client = new QueryClient()
+  const client = createQueryClient()
   const grid = (range: typeof FIRST) => (
     <QueryClientProvider client={client}>
       <CapacityGrid {...range} />
@@ -84,15 +85,13 @@ test('a save stays correct through a failure, a range change and a late response
   const { rerender } = render(grid(FIRST))
 
   // The first attempt fails: the confirmed number stays and the typed one can be retried.
-  fireEvent.click(await deeButton(40))
-  fireEvent.change(screen.getByRole('textbox', { name: /Dee Okafor/ }), {
-    target: { value: '48' },
-  })
+  const dee = await hoursInput('Dee Okafor')
+  fireEvent.change(dee, { target: { value: '48' } })
   api.nextPatch = async () => json({ error: 'boom' }, 500)
-  fireEvent.keyDown(screen.getByRole('textbox', { name: /Dee Okafor/ }), { key: 'Enter' })
+  fireEvent.keyDown(dee, { key: 'Enter' })
 
   await screen.findByText(/Couldn't save Dee Okafor \(48 h\)/)
-  await deeButton(40)
+  expect(dee.value).toBe('40')
   expect(screen.getByText('5 h over')).toBeTruthy()
 
   // The retry is in flight: the grid shows the new hours, and nobody else can be edited.
@@ -100,10 +99,11 @@ test('a save stays correct through a failure, a range change and a late response
   api.nextPatch = () => patch.promise
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
-  await deeButton(48)
+  await waitFor(() => expect(dee.value).toBe('48'))
   expect(screen.queryByText('5 h over')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: /Bo Lindqvist/ }))
-  expect(screen.queryByRole('textbox', { name: /Bo Lindqvist/ })).toBeNull()
+  const bo = await hoursInput('Bo Lindqvist')
+  fireEvent.change(bo, { target: { value: '10' } })
+  expect(bo.value).toBe('40')
 
   // The manager moves on, and that range is read before the save commits.
   const lateGet = held<void>()
@@ -119,7 +119,7 @@ test('a save stays correct through a failure, a range change and a late response
   lateGet.release()
 
   await waitFor(() => expect(hoursOf(client, SECOND)).toEqual({ weeks: [SECOND.from], dee: 48 }))
-  await deeButton(48)
+  expect((await hoursInput('Dee Okafor')).value).toBe('48')
 
   // The range left behind holds its own weeks, with the new hours.
   expect(hoursOf(client, FIRST)).toEqual({ weeks: [FIRST.from], dee: 48 })
