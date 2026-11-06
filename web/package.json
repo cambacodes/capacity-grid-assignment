@@ -9,8 +9,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.106.1",
+    "@tanstack/react-virtual": "^3.14.26",
+    "arktype": "^2.2.9",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "temporal-polyfill": "^1.0.8"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
