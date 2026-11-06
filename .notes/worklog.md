@@ -22,6 +22,9 @@ left unfinished. Append as you go; a line or two per entry is right.
 - Days stay `YYYY-MM-DD` strings and every calculation goes through `Temporal.PlainDate` (`temporal-polyfill`, because Node 24 has no native Temporal). A week is a calendar fact, so there is no instant or zone to get wrong. Only "This week" reads a clock, and it reads the viewer's calendar.
 - Go parses days with `time.Parse`, which gives UTC midnight, and moves them with `AddDate`, so DST cannot shift a day. No change was needed there.
 - Browser checks stay out of the repo. The brief asks for a test or two, and the Compose web image has no browser.
+- Correction to the one-save note above: read-only inputs dropped keystrokes, so 36 typed right after Tab saved as 6. Now only the row being saved is read-only. Everywhere else typing lands, and its save waits: Enter does nothing yet and Tab stays in the field.
+- A save with no answer, from a timeout or a lost connection, says "Couldn't confirm" because it may have landed. Retry is safe either way.
+- Go tests need `DATABASE_URL`, and they change Cem on the seeded database and restore him. With Compose up: `docker run --rm --network capacity-grid-assignment_default -v "$PWD/api:/src" -w /src -e DATABASE_URL='postgres://capacity:capacity@db:5432/capacity?sslmode=disable' golang:1.26 go test ./...`
 
 ## Tried and dropped
 
@@ -39,3 +42,9 @@ left unfinished. Append as you go; a line or two per entry is right.
 - A failed save's notice is replaced when the manager saves someone else.
 - Invalid hours left by clicking away return to the real value instead of staying in the field. Keeping them meant a stale draft could outlive a retry and send a false conflict. Enter keeps the value, marked.
 - A failed save's notice stays hidden while the grid itself cannot load, and comes back once it can.
+- Clicking away from a value during another person's save restores the real hours, because that save cannot start yet.
+- Enter during another save does nothing visible. Press it again, or leave the field, once that save ends.
+- With a slowed CPU (10x and up) and machine-speed keys, a second save can start before the lock renders. The mutation `scope` still sends both in order with the right values, but a failure of the first would be hidden.
+- The drawn table has no `aria-rowcount`, so a screen reader only sees the rows on screen.
+- Rows assume 44 px. A much larger browser font makes over-capacity rows taller, and scrolling drifts.
+- Typing a date by hand requests each valid date on the way, one full roster each.
