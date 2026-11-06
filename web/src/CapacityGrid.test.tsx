@@ -100,7 +100,8 @@ test('a save stays correct through a failure, a range change and a late response
   expect(dee.value).toBe('40')
   expect(screen.getByText('5 h over')).toBeTruthy()
 
-  // The retry is in flight: the grid shows the new hours, and nobody else can be edited.
+  // The retry is in flight: the grid shows the new hours. Typing elsewhere is kept, whole,
+  // and its save waits: Enter sends nothing and Tab stays put.
   const patch = held<Response>()
   api.nextPatch = () => patch.promise
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
@@ -108,8 +109,10 @@ test('a save stays correct through a failure, a range change and a late response
   await waitFor(() => expect(dee.value).toBe('48'))
   expect(screen.queryByText('5 h over')).toBeNull()
   const bo = await hoursInput('Bo Lindqvist')
-  fireEvent.change(bo, { target: { value: '10' } })
-  expect(bo.value).toBe('40')
+  fireEvent.change(bo, { target: { value: '36' } })
+  fireEvent.keyDown(bo, { key: 'Enter' })
+  expect(bo.value).toBe('36')
+  expect(fireEvent.keyDown(bo, { key: 'Tab' })).toBe(false)
 
   // The manager moves on, and that range is read before the save commits.
   const lateGet = held<void>()

@@ -208,12 +208,13 @@ type HoursCellProps = Omit<RowProps, 'pendingHours'> & {
 // The hours are always an input, so editing moves nothing on screen and focus stays put.
 // The draft is local: it starts on the first keystroke and ends on save, Escape or leaving
 // the field, so only the focused input ever holds one. No save response can close anything
-// here, because this state never depends on a response.
+// here, because this state never depends on a response. Another person's save holds back
+// saving, never typing: a dropped keystroke would turn 36 into a saved 6.
 function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocusChange }: HoursCellProps) {
   const [draft, setDraft] = useState<Draft | null>(null)
 
   function saveDraft() {
-    if (!draft) return
+    if (!draft || locked) return
     const weeklyHours = parseHours(draft.text)
     if (weeklyHours === null) return
     setDraft(null)
@@ -221,12 +222,14 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
   }
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
-    if (!locked) setDraft({ text: event.target.value, person: draft?.person ?? person })
+    setDraft({ text: event.target.value, person: draft?.person ?? person })
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Enter') saveDraft()
     if (event.key === 'Escape') setDraft(null)
+    // Tab waits for the save in flight, because leaving now would lose what was typed.
+    if (event.key === 'Tab' && locked && draft) event.preventDefault()
   }
 
   function handleFocus(event: FocusEvent<HTMLInputElement>) {
@@ -234,7 +237,8 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
     onFocusChange(person.id)
   }
 
-  // Leaving with an invalid value restores the real hours. Enter keeps it, marked.
+  // Clicking away with a value that cannot be saved yet, or an invalid one, restores the
+  // real hours. Enter keeps it, marked if invalid.
   function handleBlur() {
     saveDraft()
     setDraft(null)
@@ -254,7 +258,7 @@ function HoursCell({ person, shownHours, saving, failed, locked, onSave, onFocus
         inputMode="decimal"
         aria-label={label}
         aria-invalid={invalid}
-        readOnly={locked}
+        readOnly={saving}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
